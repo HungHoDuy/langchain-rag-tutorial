@@ -1,52 +1,34 @@
-import argparse
-# from dataclasses import dataclass
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+from sentence_transformers import SentenceTransformer
+from langchain_chroma import Chroma
 
 CHROMA_PATH = "chroma"
 
-PROMPT_TEMPLATE = """
-Answer the question based only on the following context:
+class CustomEmbeddingFunction:
+    def __init__(self, model_name):
+        self.model = SentenceTransformer(model_name)
 
-{context}
+    def embed_query(self, text):
+        return self.model.encode(text, convert_to_tensor=True).tolist()  # Convert to list for compatibility
 
----
+    def embed_documents(self, texts):
+        return self.model.encode(texts, convert_to_tensor=True).tolist()  # Convert to list for compatibility
 
-Answer the question based on the above context: {question}
-"""
-
-
-def main():
-    # Create CLI.
-    parser = argparse.ArgumentParser()
-    parser.add_argument("query_text", type=str, help="The query text.")
-    args = parser.parse_args()
-    query_text = args.query_text
-
+def query_rag(query_text: str):
     # Prepare the DB.
-    embedding_function = OpenAIEmbeddings()
+    embedding_function = CustomEmbeddingFunction('sentence-transformers/all-mpnet-base-v2')
     db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding_function)
 
     # Search the DB.
-    results = db.similarity_search_with_relevance_scores(query_text, k=3)
-    if len(results) == 0 or results[0][1] < 0.7:
-        print(f"Unable to find matching results.")
-        return
+    results = db.similarity_search_with_score(query_text, k=5)
 
-    context_text = "\n\n---\n\n".join([doc.page_content for doc, _score in results])
-    prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-    prompt = prompt_template.format(context=context_text, question=query_text)
-    print(prompt)
+    # Prepare context text with source information from results
+    context_text = "\n\n---\n\n".join(
+        [f"Source: {doc.metadata.get('source', 'Unknown')}\nContent: {doc.page_content}" for doc, _score in results]
+    )
 
-    model = ChatOpenAI()
-    response_text = model.predict(prompt)
-
-    sources = [doc.metadata.get("source", None) for doc, _score in results]
-    formatted_response = f"Response: {response_text}\nSources: {sources}"
-    print(formatted_response)
-
+    # Output the context text with source information
+    print(f"Context for the query: {context_text}")
 
 if __name__ == "__main__":
-    main()
+    query = "What to eat in Quy Nhon"
+    query_rag(query)
